@@ -298,17 +298,16 @@
     </div>
   </div>
 
-  <!-- STEP 4: 完了 -->
+  <!-- STEP 4: セグメント結果（1本ずつ表示） -->
   <div class="card hidden" id="step4">
     <div class="result-header">
       <div class="icon">✅</div>
       <div>
-        <h3>分割完了！</h3>
-        <p>「共有 / 保存」からLINEに送れます</p>
+        <h3 id="step4Header">パート完成！</h3>
+        <p id="step4Sub">LINEに送ってから次のパートへ進んでください</p>
       </div>
     </div>
     <div id="segmentList"></div>
-    <button class="btn-reset" onclick="resetApp()">🔄 別の動画を分割する</button>
   </div>
 
   <!-- ヒント -->
@@ -351,7 +350,13 @@
     let ffmpegReady = false;
     let selectedFile = null;
     let videoDuration = 0;
-    let segmentBlobs  = [];
+
+    // 1本ずつ処理するための状態変数
+    let totalSegments  = 0;
+    let currentSegIdx  = 0;
+    let currentBlob    = null;
+    let currentBlobUrl = null;
+    const MOUNT_POINT  = '/input';
 
     // ── ユーティリティ ──────────────────────────────
     function formatTime(sec) {
@@ -437,131 +442,158 @@
     window.startSplit = async function() {
       if (!selectedFile) return;
 
+      currentSegIdx = 0;
+      totalSegments = Math.ceil((videoDuration || 1) / SEGMENT_SEC);
+
       hide('step2');
       show('step3');
-      segmentBlobs = [];
 
       try {
         await ensureFFmpeg();
 
-        // ── WORKERFS でファイルを直接マウント（全体をメモリに読まないので大容量OK）──
+        // WORKERFS でファイルをマウント（全体をメモリに読み込まない）
         document.getElementById('splitStatus').textContent = 'ファイルをマウント中…';
-        const mountPoint = '/input';
-        await ffmpeg.mount('WORKERFS', { files: [selectedFile] }, mountPoint);
-        const inputPath = `${mountPoint}/${selectedFile.name}`;
+        // ファイル名を固定して特殊文字トラブルを防ぐ
+        const inputFile = new File([selectedFile], 'input.mp4', { type: selectedFile.type });
+        await ffmpeg.mount('WORKERFS', { files: [inputFile] }, MOUNT_POINT);
 
-        const duration  = videoDuration || 1;
-        const numSeg    = Math.ceil(duration / SEGMENT_SEC);
-
-        for (let i = 0; i < numSeg; i++) {
-          const start   = i * SEGMENT_SEC;
-          const segLen  = Math.min(SEGMENT_SEC, duration - start);
-          const outName = `part${String(i+1).padStart(2,'0')}.mp4`;
-
-          document.getElementById('splitStatus').textContent =
-            `分割中 ${i+1} / ${numSeg}（${formatTime(start)} 〜 ${formatTime(start + segLen)}）`;
-          document.getElementById('splitBar').style.width =
-            `${Math.round((i / numSeg) * 95)}%`;
-
-          await ffmpeg.exec([
-            '-ss', String(start),
-            '-i', inputPath,
-            '-t', String(segLen),
-            '-c', 'copy',
-            '-avoid_negative_ts', '1',
-            '-movflags', '+faststart',
-            outName
-          ]);
-
-          const raw  = await ffmpeg.readFile(outName);
-          const blob = new Blob([raw], { type: 'video/mp4' });
-          segmentBlobs.push({
-            blob, name: outName,
-            start, end: start + segLen, index: i + 1
-          });
-
-          await ffmpeg.deleteFile(outName);
-        }
-
-        // マウント解除
-        await ffmpeg.unmount(mountPoint);
-
-        document.getElementById('splitBar').style.width = '100%';
-        document.getElementById('splitStatus').textContent = '完了！';
-
-        hide('step3');
-        renderResults();
-        show('step4');
+        await processSegment();
 
       } catch (err) {
-        const msg = err.message || String(err);
-        document.getElementById('splitStatus').textContent = 'エラー: ' + msg;
-        document.getElementById('splitStatus').style.color = '#c0392b';
-        document.getElementById('splitStatus').style.fontWeight = '600';
-        // エラー詳細をアラートでも表示
-        alert('分割に失敗しました。\n\n' + msg + '\n\n動画が大きすぎる場合は短い動画でお試しください。');
-        console.error(err);
-        hide('step3');
-        show('step2');
+        showSplitError(err);
       }
     };
 
-    // ── 結果表示 ──────────────────────────────────
-    function renderResults() {
-      const list = document.getElementById('segmentList');
-      list.innerHTML = '';
+    // ── 1セグメントずつ処理 ────────────────────────
+    async function processSegment() {
+      const i      = currentSegIdx;
+      const n      = totalSegments;
+      const dur    = videoDuration || 1;
+      const start  = i * SEGMENT_SEC;
+      const segLen = Math.min(SEGMENT_SEC, dur - start);
+      const out    = `part${String(i+1).padStart(2,'0')}.mp4`;
 
-      segmentBlobs.forEach(({ blob, name, start, end, index }) => {
-        const item = document.createElement('div');
-        item.className = 'segment-item';
-        item.innerHTML = `
-          <div class="segment-num">${index}</div>
-          <div class="segment-info">
-            <div class="segment-title">パート ${index}</div>
-            <div class="segment-time">
-              ${formatTime(start)} 〜 ${formatTime(end)} &nbsp;|&nbsp; ${formatSize(blob.size)}
-            </div>
-          </div>
-          <button class="btn-share" onclick="shareSegment(${index - 1})">
-            📤 共有 / 保存
-          </button>
-        `;
-        list.appendChild(item);
-      });
+      show('step3');
+      hide('step4');
+      document.getElementById('splitBar').style.width = `${Math.round((i / n) * 95)}%`;
+      document.getElementById('splitStatus').textContent =
+        `処理中 ${i+1} / ${n}（${formatTime(start)} 〜 ${formatTime(start + segLen)}）`;
+
+      try {
+        await ffmpeg.exec([
+          '-ss', String(start),
+          '-i', `${MOUNT_POINT}/input.mp4`,
+          '-t', String(segLen),
+          '-c', 'copy',
+          '-avoid_negative_ts', '1',
+          '-movflags', '+faststart',
+          out
+        ]);
+
+        const raw = await ffmpeg.readFile(out);
+        await ffmpeg.deleteFile(out); // すぐにWASMメモリを解放
+
+        // 前のblobを解放してから新しいものを生成
+        if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+        currentBlob    = new Blob([raw], { type: 'video/mp4' });
+        currentBlobUrl = URL.createObjectURL(currentBlob);
+
+        hide('step3');
+        renderCurrentSegment(i, n, currentBlob, start, start + segLen);
+        show('step4');
+
+      } catch (err) {
+        showSplitError(err);
+      }
     }
 
-    // ── 共有 ──────────────────────────────────────
-    window.shareSegment = async function(idx) {
-      const { blob, name } = segmentBlobs[idx];
-      const file = new File([blob], name, { type: 'video/mp4' });
+    // ── 現在のセグメントを表示 ─────────────────────
+    function renderCurrentSegment(i, n, blob, start, end) {
+      const isLast = (i === n - 1);
+      document.getElementById('step4Header').textContent =
+        isLast ? '🎉 全パート完了！' : `✅ パート ${i+1} / ${n} 完成！`;
+      document.getElementById('step4Sub').textContent =
+        isLast ? 'すべての分割が完了しました' : 'LINEに送ってから次のパートへ進んでください';
 
-      // iOS の Share Sheet を使う（LINEや写真アプリに直接送れる）
+      document.getElementById('segmentList').innerHTML = `
+        <div class="segment-item">
+          <div class="segment-num">${i+1}</div>
+          <div class="segment-info">
+            <div class="segment-title">パート ${i+1} / ${n}</div>
+            <div class="segment-time">${formatTime(start)} 〜 ${formatTime(end)} &nbsp;|&nbsp; ${formatSize(blob.size)}</div>
+          </div>
+          <button class="btn-share" onclick="shareCurrentSegment()">📤 LINEに送る</button>
+        </div>
+        ${!isLast ? `
+          <button class="btn btn-primary" style="margin-top:14px" onclick="nextSegment()">
+            次のパート (${i+2}/${n}) を処理する →
+          </button>
+          <div style="font-size:12px;color:#888;text-align:center;margin-top:6px">
+            LINEに送ってから次へ進んでください
+          </div>
+        ` : `
+          <button class="btn-reset" onclick="resetApp()" style="margin-top:14px">
+            🔄 別の動画を分割する
+          </button>
+        `}
+      `;
+    }
+
+    // ── 現在のセグメントを共有 ─────────────────────
+    window.shareCurrentSegment = async function() {
+      if (!currentBlob) return;
+      const name = `part${String(currentSegIdx+1).padStart(2,'0')}.mp4`;
+      const file = new File([currentBlob], name, { type: 'video/mp4' });
+
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: name });
           return;
         } catch (e) {
-          if (e.name === 'AbortError') return; // ユーザーがキャンセル
+          if (e.name === 'AbortError') return;
         }
       }
-
-      // フォールバック: ダウンロードリンク
-      const url = URL.createObjectURL(blob);
-      const a   = document.createElement('a');
-      a.href    = url;
+      // フォールバック
+      const a = document.createElement('a');
+      a.href = currentBlobUrl;
       a.download = name;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
     };
 
+    // ── 次のセグメントへ ───────────────────────────
+    window.nextSegment = async function() {
+      // 前のblobを解放してからメモリを確保
+      if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+      currentBlob = null;
+
+      currentSegIdx++;
+      if (currentSegIdx >= totalSegments) {
+        try { await ffmpeg.unmount(MOUNT_POINT); } catch(e) {}
+        return;
+      }
+      await processSegment();
+    };
+
+    // ── エラー表示 ─────────────────────────────────
+    function showSplitError(err) {
+      const msg = err.message || String(err);
+      document.getElementById('splitStatus').textContent = 'エラー: ' + msg;
+      document.getElementById('splitStatus').style.color = '#c0392b';
+      document.getElementById('splitStatus').style.fontWeight = '600';
+      alert('分割に失敗しました。\n\n' + msg);
+      console.error(err);
+      hide('step3');
+      show('step2');
+    }
+
     // ── リセット ──────────────────────────────────
-    window.resetApp = function() {
-      segmentBlobs.forEach(({ blob }) => {
-        // blob URLs は自動GC されるが明示的に解放
-      });
-      segmentBlobs = [];
+    window.resetApp = async function() {
+      try { await ffmpeg.unmount(MOUNT_POINT); } catch(e) {}
+      if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+      currentBlob = null;
+      currentSegIdx = 0;
       selectedFile = null;
       videoDuration = 0;
 
