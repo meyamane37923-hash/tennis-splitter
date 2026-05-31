@@ -4,62 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="動画分割">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎾</text></svg>">
   <title>テニス動画分割</title>
-  <script>
-    // Service Worker を登録して SharedArrayBuffer（ffmpeg必須機能）を有効化
-    // crossOriginIsolated でない場合、SW 有効化後すぐにリロード（ユーザー操作前に完了させる）
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./coi-serviceworker.js').then(function(reg) {
-        if (crossOriginIsolated) return; // すでに有効 → リロード不要
-
-        // 準備中オーバーレイを表示
-        var overlay = document.getElementById('preparingOverlay');
-        if (overlay) overlay.style.display = 'flex';
-
-        function doReload() { window.location.reload(); }
-
-        if (reg.installing) {
-          reg.installing.addEventListener('statechange', function(e) {
-            if (e.target.state === 'activated') doReload();
-          });
-        } else if (reg.waiting) {
-          reg.waiting.addEventListener('statechange', function(e) {
-            if (e.target.state === 'activated') doReload();
-          });
-          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-        } else {
-          // SW はすでにアクティブだがまだ isolated でない → そのままリロード
-          doReload();
-        }
-      }).catch(function(err) {
-        console.warn('SW registration failed:', err);
-      });
-    }
-  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
       background: #f0f4f8;
       min-height: 100vh;
-      padding: env(safe-area-inset-top, 12px) 16px env(safe-area-inset-bottom, 16px);
+      padding: 16px 16px env(safe-area-inset-bottom, 16px);
     }
-
     header {
       background: linear-gradient(135deg, #1a5276, #2980b9);
       color: white;
       padding: 20px;
       border-radius: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       text-align: center;
     }
     header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
     header p  { font-size: 13px; opacity: 0.85; }
-
     .card {
       background: white;
       border-radius: 16px;
@@ -67,620 +31,399 @@
       margin-bottom: 14px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.07);
     }
-
-    /* ── Upload area ── */
     .upload-area {
       border: 2.5px dashed #2980b9;
       border-radius: 12px;
       padding: 44px 20px;
       text-align: center;
       cursor: pointer;
-      transition: background 0.15s;
       -webkit-tap-highlight-color: transparent;
     }
     .upload-area:active { background: #eaf4fb; }
-    .upload-icon { font-size: 52px; margin-bottom: 14px; line-height: 1; }
+    .upload-icon { font-size: 52px; margin-bottom: 14px; }
     .upload-area h2 { color: #2980b9; font-size: 19px; font-weight: 700; margin-bottom: 8px; }
     .upload-area p  { color: #777; font-size: 14px; }
-
     #fileInput { display: none; }
-
-    /* ── Buttons ── */
     .btn {
-      display: block;
-      width: 100%;
-      padding: 17px;
-      border: none;
-      border-radius: 12px;
-      font-size: 17px;
-      font-weight: 700;
-      cursor: pointer;
-      text-align: center;
-      transition: opacity 0.15s;
+      display: block; width: 100%; padding: 17px;
+      border: none; border-radius: 12px;
+      font-size: 17px; font-weight: 700; cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    .btn:active  { opacity: 0.75; }
+    .btn:active { opacity: 0.75; }
     .btn:disabled { background: #b0bec5 !important; cursor: not-allowed; }
     .btn-primary { background: #2980b9; color: white; }
     .btn-share {
-      padding: 11px 16px;
-      border: none;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      background: #2980b9;
-      color: white;
-      flex-shrink: 0;
+      padding: 11px 16px; border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 600; cursor: pointer;
+      background: #2980b9; color: white; flex-shrink: 0;
       -webkit-tap-highlight-color: transparent;
     }
     .btn-share:active { opacity: 0.75; }
-    .btn-reset {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      border: 2px solid #2980b9;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      text-align: center;
-      background: white;
-      color: #2980b9;
-      margin-top: 12px;
+    .btn-next {
+      display: block; width: 100%; padding: 14px;
+      border: none; border-radius: 12px; font-size: 16px; font-weight: 700;
+      cursor: pointer; background: #16a085; color: white; margin-top: 12px;
       -webkit-tap-highlight-color: transparent;
     }
-
-    /* ── Progress ── */
+    .btn-reset {
+      display: block; width: 100%; padding: 14px;
+      border: 2px solid #2980b9; border-radius: 12px;
+      font-size: 16px; font-weight: 600; cursor: pointer;
+      background: white; color: #2980b9; margin-top: 12px;
+      -webkit-tap-highlight-color: transparent;
+    }
     .progress-wrap {
-      background: #e0e7ef;
-      border-radius: 99px;
-      height: 9px;
-      margin: 12px 0 6px;
-      overflow: hidden;
+      background: #e0e7ef; border-radius: 99px;
+      height: 10px; margin: 12px 0 6px; overflow: hidden;
     }
     .progress-bar {
       background: linear-gradient(90deg, #2980b9, #16a085);
-      height: 100%;
-      width: 0%;
-      transition: width 0.4s ease;
+      height: 100%; width: 0%; transition: width 0.3s ease;
       border-radius: 99px;
     }
-    .status-text {
-      text-align: center;
-      color: #555;
-      font-size: 13px;
-      min-height: 18px;
+    .status-text { text-align: center; color: #555; font-size: 13px; min-height: 18px; }
+    .file-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .badge {
+      background: #f0f4f8; border-radius: 8px;
+      padding: 6px 10px; font-size: 13px; color: #444;
     }
-
-    /* ── Segment list ── */
-    .segment-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 13px 0;
-      border-bottom: 1px solid #f0f4f8;
+    .badge strong { color: #1a5276; }
+    .seg-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 13px 0; border-bottom: 1px solid #f0f4f8;
     }
-    .segment-item:last-child { border-bottom: none; }
-    .segment-num {
-      width: 36px;
-      height: 36px;
-      background: #eaf4fb;
-      color: #2980b9;
-      border-radius: 50%;
-      font-weight: 700;
-      font-size: 15px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
+    .seg-item:last-child { border-bottom: none; }
+    .seg-num {
+      width: 36px; height: 36px; background: #eaf4fb; color: #2980b9;
+      border-radius: 50%; font-weight: 700; font-size: 15px;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     }
-    .segment-info { flex: 1; min-width: 0; }
-    .segment-title { font-weight: 600; color: #1a5276; font-size: 15px; }
-    .segment-time  { font-size: 12px; color: #888; margin-top: 2px; }
-
-    /* ── Result header ── */
-    .result-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
+    .seg-info { flex: 1; }
+    .seg-title { font-weight: 600; color: #1a5276; font-size: 15px; }
+    .seg-time  { font-size: 12px; color: #888; margin-top: 2px; }
+    .result-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
     .result-header .icon { font-size: 28px; }
     .result-header h3 { color: #16a085; font-size: 18px; font-weight: 700; }
     .result-header p  { color: #666; font-size: 13px; }
-
-    /* ── Info box ── */
     .info-box {
-      background: #eaf4fb;
-      border-left: 4px solid #2980b9;
-      padding: 12px 14px;
-      border-radius: 6px;
-      font-size: 13px;
-      color: #555;
-      line-height: 1.7;
+      background: #eaf4fb; border-left: 4px solid #2980b9;
+      padding: 12px 14px; border-radius: 6px;
+      font-size: 13px; color: #555; line-height: 1.7;
     }
-
-    /* ── Section label ── */
-    .section-label {
-      font-size: 12px;
-      font-weight: 700;
-      color: #2980b9;
-      letter-spacing: 0.05em;
-      margin-bottom: 12px;
-      text-transform: uppercase;
-    }
-
-    /* ── File info ── */
-    .file-info-row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-    .file-badge {
-      background: #f0f4f8;
-      border-radius: 8px;
-      padding: 6px 10px;
-      font-size: 13px;
-      color: #444;
-    }
-    .file-badge strong { color: #1a5276; }
-
     .hidden { display: none !important; }
-
-    /* ── Loading spinner ── */
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner {
-      width: 20px; height: 20px;
-      border: 3px solid #e0e7ef;
-      border-top-color: #2980b9;
-      border-radius: 50%;
+      width: 20px; height: 20px; border: 3px solid #e0e7ef;
+      border-top-color: #2980b9; border-radius: 50%;
       animation: spin 0.8s linear infinite;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 8px;
+      display: inline-block; vertical-align: middle; margin-right: 8px;
     }
   </style>
 </head>
 <body>
 
-  <!-- 初回ロード時の準備中オーバーレイ（SW起動→リロードまでの間だけ表示） -->
-  <div id="preparingOverlay" style="display:none;position:fixed;inset:0;background:rgba(26,82,118,0.95);z-index:9999;flex-direction:column;align-items:center;justify-content:center;color:white;font-family:-apple-system,sans-serif;">
-    <div style="font-size:48px;margin-bottom:20px">🎾</div>
-    <div style="font-size:20px;font-weight:700;margin-bottom:10px">準備中…</div>
-    <div style="font-size:14px;opacity:0.8">初回起動の準備をしています<br>自動的に再読み込みされます</div>
-    <div style="margin-top:24px;width:48px;height:48px;border:4px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+<header>
+  <h1>🎾 テニス動画分割</h1>
+  <p>5分ごとに自動カット → LINEで共有</p>
+</header>
+
+<!-- STEP 1: ファイル選択 -->
+<div class="card" id="step1">
+  <div class="upload-area" id="uploadArea">
+    <div class="upload-icon">🎥</div>
+    <h2>動画を選択</h2>
+    <p>タップしてiPhoneから動画を選ぶ</p>
   </div>
+  <input type="file" id="fileInput" accept="video/*">
+</div>
 
-  <header>
-    <h1>🎾 テニス動画分割</h1>
-    <p>5分ごとに自動カット → LINEで共有</p>
-  </header>
-
-  <!-- STEP 1: ファイル選択 -->
-  <div class="card" id="step1">
-    <div class="upload-area" id="uploadArea">
-      <div class="upload-icon">🎥</div>
-      <h2>動画を選択</h2>
-      <p>タップしてiPhoneから動画を選ぶ</p>
-    </div>
-    <input type="file" id="fileInput" accept="video/*">
+<!-- STEP 2: 確認 -->
+<div class="card hidden" id="step2">
+  <div style="font-size:12px;font-weight:700;color:#2980b9;margin-bottom:12px">選択した動画</div>
+  <div class="file-row">
+    <div class="badge">📁 <strong id="fileName">—</strong></div>
+    <div class="badge">⏱ <strong id="fileDuration">—</strong></div>
+    <div class="badge">💾 <strong id="fileSize">—</strong></div>
+    <div class="badge">✂️ <strong id="fileSegments">—</strong></div>
   </div>
+  <button class="btn btn-primary" id="startBtn" onclick="startSplit()">
+    ✂️ 5分ごとに分割する
+  </button>
+</div>
 
-  <!-- STEP 2: ファイル確認 & 開始 -->
-  <div class="card hidden" id="step2">
-    <div class="section-label">選択した動画</div>
-    <div class="file-info-row">
-      <div class="file-badge">📁 <strong id="fileName">—</strong></div>
-      <div class="file-badge">⏱ <strong id="fileDuration">—</strong></div>
-      <div class="file-badge">💾 <strong id="fileSize">—</strong></div>
-      <div class="file-badge">✂️ <strong id="fileSegments">—</strong></div>
-    </div>
-
-    <div id="ffmpegLoadArea" class="hidden">
-      <div class="progress-wrap"><div class="progress-bar" id="loadBar" style="width:0%"></div></div>
-      <div class="status-text" id="loadStatus">ffmpegを読み込み中…</div>
-    </div>
-
-    <button class="btn btn-primary" id="startBtn" onclick="startSplit()">
-      ✂️ 5分ごとに分割する
-    </button>
+<!-- STEP 3: 処理中 -->
+<div class="card hidden" id="step3">
+  <div style="font-weight:700;color:#1a5276;margin-bottom:12px">
+    <span class="spinner"></span>処理中…
   </div>
+  <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+  <div class="status-text" id="statusText">準備中…</div>
+  <div style="font-size:12px;color:#aaa;text-align:center;margin-top:10px">
+    画面をスリープさせないでください
+  </div>
+</div>
 
-  <!-- STEP 3: 処理中 -->
-  <div class="card hidden" id="step3">
-    <div class="section-label"><span class="spinner"></span>処理中</div>
-    <div class="progress-wrap"><div class="progress-bar" id="splitBar"></div></div>
-    <div class="status-text" id="splitStatus">準備中…</div>
-    <div style="font-size:12px;color:#aaa;text-align:center;margin-top:10px">
-      画面をそのままにしてください
+<!-- STEP 4: 結果（1本ずつ） -->
+<div class="card hidden" id="step4">
+  <div class="result-header">
+    <div class="icon">✅</div>
+    <div>
+      <h3 id="step4Title">パート完成！</h3>
+      <p id="step4Sub">LINEに送ってから次へ進んでください</p>
     </div>
   </div>
+  <div id="segList"></div>
+</div>
 
-  <!-- STEP 4: セグメント結果（1本ずつ表示） -->
-  <div class="card hidden" id="step4">
-    <div class="result-header">
-      <div class="icon">✅</div>
-      <div>
-        <h3 id="step4Header">パート完成！</h3>
-        <p id="step4Sub">LINEに送ってから次のパートへ進んでください</p>
+<!-- ヒント -->
+<div class="card">
+  <div class="info-box">
+    📱 動画はiPhone内だけで処理されます（外部送信なし）<br>
+    🔗 「📤 LINEに送る」でLINEに直接共有できます<br>
+    ⚠️ 処理中は画面をスリープさせないでください
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+<script>
+const SEGMENT_SEC = 300; // 5分
+
+let selectedFile = null;
+let videoDuration = 0;
+let currentBlob   = null;
+let currentBlobUrl = null;
+let currentSegIdx  = 0;
+let allBlobs       = [];
+
+// ── ユーティリティ ─────────────────────────────
+function fmt(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+    : `${m}:${String(s).padStart(2,'0')}`;
+}
+function fmtSize(b) {
+  if (b >= 1e9) return `${(b/1e9).toFixed(1)} GB`;
+  if (b >= 1e6) return `${(b/1e6).toFixed(0)} MB`;
+  return `${(b/1e3).toFixed(0)} KB`;
+}
+function show(id) { document.getElementById(id).classList.remove('hidden'); }
+function hide(id) { document.getElementById(id).classList.add('hidden'); }
+function setStatus(t) { document.getElementById('statusText').textContent = t; }
+function setProgress(p) { document.getElementById('progressBar').style.width = `${Math.round(p*100)}%`; }
+
+// ── ファイル選択 ────────────────────────────────
+document.getElementById('uploadArea').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  selectedFile = file;
+
+  const video = document.createElement('video');
+  video.preload = 'metadata';
+  video.src = URL.createObjectURL(file);
+  await new Promise(r => { video.onloadedmetadata = r; video.onerror = r; });
+  videoDuration = video.duration || 0;
+  URL.revokeObjectURL(video.src);
+
+  const n = Math.ceil(videoDuration / SEGMENT_SEC);
+  document.getElementById('fileName').textContent =
+    file.name.length > 22 ? file.name.slice(0,20)+'…' : file.name;
+  document.getElementById('fileDuration').textContent = fmt(videoDuration);
+  document.getElementById('fileSize').textContent     = fmtSize(file.size);
+  document.getElementById('fileSegments').textContent = `${n}個に分割`;
+
+  hide('step1');
+  show('step2');
+});
+
+// ── 分割開始 ────────────────────────────────────
+window.startSplit = async function() {
+  if (!selectedFile) return;
+  hide('step2');
+  show('step3');
+  allBlobs = [];
+  currentSegIdx = 0;
+
+  try {
+    allBlobs = await splitWithMp4box(selectedFile, SEGMENT_SEC);
+    hide('step3');
+    showSegment(0);
+  } catch(err) {
+    setStatus('❌ エラー: ' + (err.message || String(err)));
+    document.getElementById('statusText').style.color = '#c0392b';
+    alert('分割に失敗しました。\n\n' + (err.message || String(err)));
+    hide('step3');
+    show('step2');
+  }
+};
+
+// ── mp4box.js で分割 ────────────────────────────
+function splitWithMp4box(file, segSec) {
+  return new Promise((resolve, reject) => {
+    const mp4 = MP4Box.createFile();
+    let initBuffer  = null;
+    let allTracks   = [];
+    let pending     = {};   // { segIdx: { trackId: buf } }
+    let segCount    = {};   // { trackId: 次に来るセグメントのインデックス }
+    let lastDone    = {};   // { trackId: true } is_last を受け取ったか
+    let blobs       = [];
+    const totalSeg  = Math.ceil(videoDuration / segSec);
+
+    mp4.onReady = function(info) {
+      allTracks = info.tracks;
+      allTracks.forEach(t => {
+        segCount[t.id] = 0;
+        mp4.setSegmentOptions(t.id, null, {
+          duration: Math.floor(segSec * t.timescale)
+        });
+      });
+      const inits = mp4.initializeSegmentation();
+      // initBuffer は全トラックの moov を含む
+      initBuffer = inits[0].buffer;
+      mp4.start();
+      setStatus('分割処理を開始…');
+    };
+
+    mp4.onSegment = function(id, user, buffer, sampleNum, is_last) {
+      const idx = segCount[id]++;
+      if (!pending[idx]) pending[idx] = {};
+      pending[idx][id] = buffer;
+
+      if (is_last) lastDone[id] = true;
+
+      // 全トラックがこのインデックスのセグメントを揃えたか確認
+      const ready = allTracks.every(t => pending[idx] && pending[idx][t.id]);
+      if (ready) {
+        // init + 全トラックのセグメントを結合
+        const parts = [initBuffer, ...allTracks.map(t => pending[idx][t.id])];
+        const total = parts.reduce((s, p) => s + p.byteLength, 0);
+        const merged = new Uint8Array(total);
+        let off = 0;
+        for (const p of parts) { merged.set(new Uint8Array(p), off); off += p.byteLength; }
+
+        blobs.push(new Blob([merged], { type: 'video/mp4' }));
+        delete pending[idx]; // メモリ解放
+
+        const segNum = blobs.length;
+        setStatus(`パート ${segNum} / ${totalSeg} 完成`);
+        setProgress(segNum / totalSeg);
+      }
+
+      // 全トラックが最後のセグメントを送ったか確認
+      const allDone = allTracks.every(t => lastDone[t.id]);
+      if (allDone) resolve(blobs);
+    };
+
+    mp4.onError = function(e) { reject(new Error(String(e))); };
+
+    // ファイルを 8MB ずつ読み込む
+    const CHUNK = 8 * 1024 * 1024;
+    let offset = 0;
+
+    function readChunk() {
+      if (offset >= file.size) { mp4.flush(); return; }
+      const slice  = file.slice(offset, Math.min(offset + CHUNK, file.size));
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const buf = e.target.result;
+        buf.fileStart = offset;
+        offset += buf.byteLength;
+        const pct = offset / file.size;
+        if (blobs.length === 0) setStatus(`解析中… ${Math.round(pct*100)}%`);
+        mp4.appendBuffer(buf);
+        setTimeout(readChunk, 0); // UIスレッドを解放
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(slice);
+    }
+    readChunk();
+  });
+}
+
+// ── セグメント結果を表示 ────────────────────────
+function showSegment(idx) {
+  currentSegIdx = idx;
+  const blob = allBlobs[idx];
+  const n    = allBlobs.length;
+  const start = idx * SEGMENT_SEC;
+  const end   = Math.min((idx + 1) * SEGMENT_SEC, videoDuration);
+  const isLast = idx === n - 1;
+
+  document.getElementById('step4Title').textContent =
+    isLast ? '🎉 全パート完了！' : `✅ パート ${idx+1} / ${n} 完成！`;
+  document.getElementById('step4Sub').textContent =
+    isLast ? 'すべての分割が完了しました' : 'LINEに送ってから次のパートへ進んでください';
+
+  // 現在のBlobを保持
+  if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+  currentBlob    = blob;
+  currentBlobUrl = URL.createObjectURL(blob);
+
+  const list = document.getElementById('segList');
+  list.innerHTML = `
+    <div class="seg-item">
+      <div class="seg-num">${idx+1}</div>
+      <div class="seg-info">
+        <div class="seg-title">パート ${idx+1} / ${n}</div>
+        <div class="seg-time">${fmt(start)} 〜 ${fmt(end)} &nbsp;|&nbsp; ${fmtSize(blob.size)}</div>
       </div>
+      <button class="btn-share" onclick="shareNow()">📤 LINEに送る</button>
     </div>
-    <div id="segmentList"></div>
-  </div>
+    ${!isLast ? `
+      <button class="btn-next" onclick="nextSeg()">
+        次のパート (${idx+2}/${n}) へ →
+      </button>
+      <div style="font-size:12px;color:#888;text-align:center;margin-top:6px">LINEに送ってから次へ進んでください</div>
+    ` : `
+      <button class="btn-reset" onclick="resetApp()">🔄 別の動画を分割する</button>
+    `}
+  `;
 
-  <!-- ヒント -->
-  <div class="card" id="hintCard">
-    <div class="info-box">
-      📱 動画はiPhone内だけで処理されます（外部送信なし）<br>
-      🔗 分割後は「共有 / 保存」でLINEに直接送れます<br>
-      ⚠️ 処理中は画面をスリープさせないでください
-    </div>
-  </div>
+  show('step4');
+}
 
-  <!-- 診断パネル（問題解析用） -->
-  <div class="card" id="diagCard" style="margin-top:8px">
-    <div style="font-size:11px;color:#999;margin-bottom:8px;font-weight:700">🔍 動作状況</div>
-    <div id="diagContent" style="font-size:12px;color:#555;line-height:1.8"></div>
-  </div>
+// ── 共有 ────────────────────────────────────────
+window.shareNow = async function() {
+  if (!currentBlob) return;
+  const name = `part${String(currentSegIdx+1).padStart(2,'0')}.mp4`;
+  const file = new File([currentBlob], name, { type: 'video/mp4' });
 
-  <!-- ffmpeg.wasm (UMD) -->
-  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-  <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch(e) { if (e.name === 'AbortError') return; }
+  }
+  // フォールバック
+  const a = document.createElement('a');
+  a.href = currentBlobUrl;
+  a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+};
 
-  <script>
-    const { FFmpeg }    = FFmpegWASM;
-    const { fetchFile, toBlobURL } = FFmpegUtil;
+// ── 次のセグメントへ ────────────────────────────
+window.nextSeg = function() {
+  // 前のBlobのURL解放（実体はまだallBlobsにある）
+  showSegment(currentSegIdx + 1);
+};
 
-    const SEGMENT_SEC = 300; // 5分
-
-    // ── 診断パネル ────────────────────────────────
-    function updateDiag() {
-      const lines = [
-        `🔒 安全モード(crossOriginIsolated): <b>${crossOriginIsolated ? '✅ ON' : '❌ OFF（ffmpegが動かない可能性）'}</b>`,
-        `🧵 SharedArrayBuffer: <b>${typeof SharedArrayBuffer !== 'undefined' ? '✅ 使用可' : '❌ 使用不可'}</b>`,
-        `👷 ServiceWorker: <b>${navigator.serviceWorker?.controller ? '✅ 有効' : '⚠️ 未アクティブ'}</b>`,
-        `🌐 ブラウザ: <b>${navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') ? 'Safari ✅' : navigator.userAgent.split(' ').slice(-1)[0]}</b>`,
-      ];
-      document.getElementById('diagContent').innerHTML = lines.join('<br>');
-    }
-    updateDiag();
-    let ffmpeg = null;
-    let ffmpegReady = false;
-    let selectedFile = null;
-    let videoDuration = 0;
-
-    // 1本ずつ処理するための状態変数
-    let totalSegments  = 0;
-    let currentSegIdx  = 0;
-    let currentBlob    = null;
-    let currentBlobUrl = null;
-    const MOUNT_POINT  = '/input';
-
-    // ── ユーティリティ ──────────────────────────────
-    function formatTime(sec) {
-      const h = Math.floor(sec / 3600);
-      const m = Math.floor((sec % 3600) / 60);
-      const s = Math.floor(sec % 60);
-      if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-      return `${m}:${String(s).padStart(2,'0')}`;
-    }
-
-    function formatSize(bytes) {
-      if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
-      if (bytes >= 1024 * 1024)        return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
-      return `${(bytes / 1024).toFixed(0)} KB`;
-    }
-
-    function show(id)   { document.getElementById(id).classList.remove('hidden'); }
-    function hide(id)   { document.getElementById(id).classList.add('hidden'); }
-
-    // ── IndexedDB キャッシュ helpers ──────────────
-    const IDB_NAME = 'ffmpeg-cache-v1';
-
-    function idbOpen() {
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
-        req.onupgradeneeded = e => e.target.result.createObjectStore('files');
-        req.onsuccess  = e => resolve(e.target.result);
-        req.onerror    = () => reject(req.error);
-      });
-    }
-    async function idbGet(key) {
-      try {
-        const db = await idbOpen();
-        return new Promise(resolve => {
-          const req = db.transaction('files','readonly').objectStore('files').get(key);
-          req.onsuccess = () => resolve(req.result || null);
-          req.onerror   = () => resolve(null);
-        });
-      } catch(e) { return null; }
-    }
-    async function idbSet(key, val) {
-      try {
-        const db = await idbOpen();
-        return new Promise(resolve => {
-          const tx = db.transaction('files','readwrite');
-          tx.objectStore('files').put(val, key);
-          tx.oncomplete = () => resolve();
-          tx.onerror    = () => resolve();
-        });
-      } catch(e) {}
-    }
-
-    // 進捗付きfetch（ArrayBuffer を返す）
-    async function fetchWithProgress(url, onProgress) {
-      const res   = await fetch(url);
-      const total = parseInt(res.headers.get('content-length') || '0');
-      const reader = res.body.getReader();
-      const chunks = [];
-      let loaded = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
-        if (total && onProgress) onProgress(loaded / total);
-      }
-      const buf = new Uint8Array(loaded);
-      let off = 0;
-      for (const c of chunks) { buf.set(c, off); off += c.length; }
-      return buf.buffer;
-    }
-
-    // ── ffmpeg ロード（初回CDN→IDBキャッシュ、2回目以降即起動）──
-    async function ensureFFmpeg() {
-      if (ffmpegReady) return;
-
-      show('ffmpegLoadArea');
-      document.getElementById('startBtn').disabled = true;
-
-      const setStatus = t => document.getElementById('loadStatus').textContent = t;
-      const setBar    = p => document.getElementById('loadBar').style.width = p + '%';
-
-      ffmpeg = new FFmpeg();
-
-      const CDN = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-
-      try {
-        // ① キャッシュ確認
-        let coreAB = await idbGet('ffmpeg-core.js');
-        let wasmAB = await idbGet('ffmpeg-core.wasm');
-
-        if (coreAB && wasmAB) {
-          setStatus('キャッシュから読み込み中…');
-          setBar(70);
-        } else {
-          // ② 初回：CDNからダウンロード＆キャッシュ保存
-          setStatus('初回のみ: ffmpeg.js をダウンロード中… (112KB)');
-          coreAB = await fetchWithProgress(`${CDN}/ffmpeg-core.js`, p => setBar(Math.round(p * 15)));
-          await idbSet('ffmpeg-core.js', coreAB);
-          setBar(15);
-
-          setStatus('初回のみ: ffmpeg.wasm をダウンロード中… (30MB, Wi-Fi推奨)');
-          wasmAB = await fetchWithProgress(`${CDN}/ffmpeg-core.wasm`, p => setBar(15 + Math.round(p * 65)));
-          await idbSet('ffmpeg-core.wasm', wasmAB);
-          setBar(80);
-
-          setStatus('ダウンロード完了！次回から即起動します ✅');
-        }
-
-        setStatus('ffmpegを起動中…');
-        const coreURL = URL.createObjectURL(new Blob([coreAB], { type: 'text/javascript' }));
-        const wasmURL = URL.createObjectURL(new Blob([wasmAB], { type: 'application/wasm' }));
-        await ffmpeg.load({ coreURL, wasmURL });
-        ffmpegReady = true;
-
-      } catch(e) {
-        setStatus('❌ 読み込み失敗。Wi-Fiに繋いで再度お試しください。');
-        throw e;
-      }
-
-      hide('ffmpegLoadArea');
-      document.getElementById('startBtn').disabled = false;
-    }
-
-    // ── ファイル選択 ──────────────────────────────
-    document.getElementById('uploadArea').addEventListener('click', () => {
-      document.getElementById('fileInput').click();
-    });
-
-    document.getElementById('fileInput').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      selectedFile = file;
-
-      // 動画の長さを取得
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.src = URL.createObjectURL(file);
-      await new Promise(resolve => {
-        video.onloadedmetadata = () => resolve();
-        video.onerror = () => resolve();
-      });
-
-      videoDuration = video.duration || 0;
-      const numSeg  = Math.ceil(videoDuration / SEGMENT_SEC);
-
-      document.getElementById('fileName').textContent     = file.name.length > 24 ? file.name.slice(0,22)+'…' : file.name;
-      document.getElementById('fileDuration').textContent = formatTime(videoDuration);
-      document.getElementById('fileSize').textContent     = formatSize(file.size);
-      document.getElementById('fileSegments').textContent = `${numSeg}個に分割`;
-
-      hide('step1');
-      show('step2');
-
-      // バックグラウンドで ffmpeg をプリロード
-      ensureFFmpeg().catch(() => {});
-    });
-
-    // ── 分割開始 ──────────────────────────────────
-    window.startSplit = async function() {
-      if (!selectedFile) return;
-
-      currentSegIdx = 0;
-      totalSegments = Math.ceil((videoDuration || 1) / SEGMENT_SEC);
-
-      hide('step2');
-      show('step3');
-
-      try {
-        await ensureFFmpeg();
-
-        // WORKERFS でファイルをマウント（全体をメモリに読み込まない）
-        document.getElementById('splitStatus').textContent = 'ファイルをマウント中…';
-        // ファイル名を固定して特殊文字トラブルを防ぐ
-        const inputFile = new File([selectedFile], 'input.mp4', { type: selectedFile.type });
-        await ffmpeg.mount('WORKERFS', { files: [inputFile] }, MOUNT_POINT);
-
-        await processSegment();
-
-      } catch (err) {
-        showSplitError(err);
-      }
-    };
-
-    // ── 1セグメントずつ処理 ────────────────────────
-    async function processSegment() {
-      const i      = currentSegIdx;
-      const n      = totalSegments;
-      const dur    = videoDuration || 1;
-      const start  = i * SEGMENT_SEC;
-      const segLen = Math.min(SEGMENT_SEC, dur - start);
-      const out    = `part${String(i+1).padStart(2,'0')}.mp4`;
-
-      show('step3');
-      hide('step4');
-      document.getElementById('splitBar').style.width = `${Math.round((i / n) * 95)}%`;
-      document.getElementById('splitStatus').textContent =
-        `処理中 ${i+1} / ${n}（${formatTime(start)} 〜 ${formatTime(start + segLen)}）`;
-
-      try {
-        await ffmpeg.exec([
-          '-ss', String(start),
-          '-i', `${MOUNT_POINT}/input.mp4`,
-          '-t', String(segLen),
-          '-c', 'copy',
-          '-avoid_negative_ts', '1',
-          '-movflags', '+faststart',
-          out
-        ]);
-
-        const raw = await ffmpeg.readFile(out);
-        await ffmpeg.deleteFile(out); // すぐにWASMメモリを解放
-
-        // 前のblobを解放してから新しいものを生成
-        if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
-        currentBlob    = new Blob([raw], { type: 'video/mp4' });
-        currentBlobUrl = URL.createObjectURL(currentBlob);
-
-        hide('step3');
-        renderCurrentSegment(i, n, currentBlob, start, start + segLen);
-        show('step4');
-
-      } catch (err) {
-        showSplitError(err);
-      }
-    }
-
-    // ── 現在のセグメントを表示 ─────────────────────
-    function renderCurrentSegment(i, n, blob, start, end) {
-      const isLast = (i === n - 1);
-      document.getElementById('step4Header').textContent =
-        isLast ? '🎉 全パート完了！' : `✅ パート ${i+1} / ${n} 完成！`;
-      document.getElementById('step4Sub').textContent =
-        isLast ? 'すべての分割が完了しました' : 'LINEに送ってから次のパートへ進んでください';
-
-      document.getElementById('segmentList').innerHTML = `
-        <div class="segment-item">
-          <div class="segment-num">${i+1}</div>
-          <div class="segment-info">
-            <div class="segment-title">パート ${i+1} / ${n}</div>
-            <div class="segment-time">${formatTime(start)} 〜 ${formatTime(end)} &nbsp;|&nbsp; ${formatSize(blob.size)}</div>
-          </div>
-          <button class="btn-share" onclick="shareCurrentSegment()">📤 LINEに送る</button>
-        </div>
-        ${!isLast ? `
-          <button class="btn btn-primary" style="margin-top:14px" onclick="nextSegment()">
-            次のパート (${i+2}/${n}) を処理する →
-          </button>
-          <div style="font-size:12px;color:#888;text-align:center;margin-top:6px">
-            LINEに送ってから次へ進んでください
-          </div>
-        ` : `
-          <button class="btn-reset" onclick="resetApp()" style="margin-top:14px">
-            🔄 別の動画を分割する
-          </button>
-        `}
-      `;
-    }
-
-    // ── 現在のセグメントを共有 ─────────────────────
-    window.shareCurrentSegment = async function() {
-      if (!currentBlob) return;
-      const name = `part${String(currentSegIdx+1).padStart(2,'0')}.mp4`;
-      const file = new File([currentBlob], name, { type: 'video/mp4' });
-
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file], title: name });
-          return;
-        } catch (e) {
-          if (e.name === 'AbortError') return;
-        }
-      }
-      // フォールバック
-      const a = document.createElement('a');
-      a.href = currentBlobUrl;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    };
-
-    // ── 次のセグメントへ ───────────────────────────
-    window.nextSegment = async function() {
-      // 前のblobを解放してからメモリを確保
-      if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
-      currentBlob = null;
-
-      currentSegIdx++;
-      if (currentSegIdx >= totalSegments) {
-        try { await ffmpeg.unmount(MOUNT_POINT); } catch(e) {}
-        return;
-      }
-      await processSegment();
-    };
-
-    // ── エラー表示 ─────────────────────────────────
-    function showSplitError(err) {
-      const msg = err.message || String(err);
-      document.getElementById('splitStatus').textContent = 'エラー: ' + msg;
-      document.getElementById('splitStatus').style.color = '#c0392b';
-      document.getElementById('splitStatus').style.fontWeight = '600';
-      alert('分割に失敗しました。\n\n' + msg);
-      console.error(err);
-      hide('step3');
-      show('step2');
-    }
-
-    // ── リセット ──────────────────────────────────
-    window.resetApp = async function() {
-      try { await ffmpeg.unmount(MOUNT_POINT); } catch(e) {}
-      if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
-      currentBlob = null;
-      currentSegIdx = 0;
-      selectedFile = null;
-      videoDuration = 0;
-
-      document.getElementById('fileInput').value = '';
-      document.getElementById('segmentList').innerHTML = '';
-      document.getElementById('splitBar').style.width = '0%';
-
-      hide('step2'); hide('step3'); hide('step4');
-      show('step1');
-    };
-  </script>
+// ── リセット ────────────────────────────────────
+window.resetApp = function() {
+  if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+  currentBlob = null; currentBlobUrl = null;
+  allBlobs = []; selectedFile = null; videoDuration = 0;
+  currentSegIdx = 0;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('segList').innerHTML = '';
+  document.getElementById('progressBar').style.width = '0%';
+  hide('step2'); hide('step3'); hide('step4');
+  show('step1');
+};
+</script>
 </body>
 </html>
