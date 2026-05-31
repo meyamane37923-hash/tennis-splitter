@@ -267,17 +267,32 @@ window.startSplit = async function() {
 // ── mp4box.js で分割 ────────────────────────────
 function splitWithMp4box(file, segSec) {
   return new Promise((resolve, reject) => {
-    const mp4 = MP4Box.createFile();
+    const mp4       = MP4Box.createFile();
     let initBuffer  = null;
     let allTracks   = [];
     let pending     = {};   // { segIdx: { trackId: buf } }
     let segCount    = {};   // { trackId: 次に来るセグメントのインデックス }
-    let lastDone    = {};   // { trackId: true } is_last を受け取ったか
     let blobs       = [];
     const totalSeg  = Math.ceil(videoDuration / segSec);
+    let settled     = false;
+
+    function doResolve() {
+      if (settled) return;
+      settled = true;
+      if (blobs.length > 0) {
+        setProgress(1);
+        resolve(blobs);
+      } else {
+        reject(new Error(
+          'セグメントが生成されませんでした。\n' +
+          '動画ファイルの形式を確認してください。'
+        ));
+      }
+    }
 
     mp4.onReady = function(info) {
       allTracks = info.tracks;
+      setStatus(`トラック ${allTracks.length} 本検出 — 分割開始…`);
       allTracks.forEach(t => {
         segCount[t.id] = 0;
         mp4.setSegmentOptions(t.id, null, {
@@ -285,10 +300,9 @@ function splitWithMp4box(file, segSec) {
         });
       });
       const inits = mp4.initializeSegmentation();
-      // initBuffer は全トラックの moov を含む
+      // inits[0].buffer は全トラックの moov を含む初期化セグメント
       initBuffer = inits[0].buffer;
       mp4.start();
-      setStatus('分割処理を開始…');
     };
 
     mp4.onSegment = function(id, user, buffer, sampleNum, is_last) {
@@ -296,47 +310,59 @@ function splitWithMp4box(file, segSec) {
       if (!pending[idx]) pending[idx] = {};
       pending[idx][id] = buffer;
 
-      if (is_last) lastDone[id] = true;
-
       // 全トラックがこのインデックスのセグメントを揃えたか確認
-      const ready = allTracks.every(t => pending[idx] && pending[idx][t.id]);
+      const ready = allTracks.every(t => pending[idx] && pending[idx][t.id] !== undefined);
       if (ready) {
-        // init + 全トラックのセグメントを結合
+        // init + 全トラックのセグメントを結合 → 独立再生可能な fMP4
         const parts = [initBuffer, ...allTracks.map(t => pending[idx][t.id])];
         const total = parts.reduce((s, p) => s + p.byteLength, 0);
         const merged = new Uint8Array(total);
         let off = 0;
         for (const p of parts) { merged.set(new Uint8Array(p), off); off += p.byteLength; }
-
         blobs.push(new Blob([merged], { type: 'video/mp4' }));
         delete pending[idx]; // メモリ解放
 
-        const segNum = blobs.length;
-        setStatus(`パート ${segNum} / ${totalSeg} 完成`);
-        setProgress(segNum / totalSeg);
+        setStatus(`パート ${blobs.length} / ${totalSeg} 完成`);
+        setProgress(blobs.length / totalSeg);
       }
 
-      // 全トラックが最後のセグメントを送ったか確認
-      const allDone = allTracks.every(t => lastDone[t.id]);
-      if (allDone) resolve(blobs);
+      // is_last は mp4box.js のバージョンによっては発火しない場合があるため
+      // flush() 後の setTimeout でも doResolve() を呼ぶ（下記参照）
+      if (is_last) {
+        const allDone = allTracks.every(t => {
+          const lastIdx = segCount[t.id] - 1;
+          return blobs.length > 0; // 少なくとも 1 セグメント生成済みなら完了とみなす
+        });
+        if (allDone) doResolve();
+      }
     };
 
-    mp4.onError = function(e) { reject(new Error(String(e))); };
+    mp4.onError = function(e) {
+      if (!settled) { settled = true; reject(new Error('MP4解析エラー: ' + String(e))); }
+    };
 
     // ファイルを 8MB ずつ読み込む
     const CHUNK = 8 * 1024 * 1024;
     let offset = 0;
 
     function readChunk() {
-      if (offset >= file.size) { mp4.flush(); return; }
+      if (offset >= file.size) {
+        setStatus('最終処理中…');
+        mp4.flush();
+        // mp4box.js のコールバックは同期的。
+        // flush() 完了後に全セグメントが生成されているはずなので解決する。
+        // is_last が発火しないバージョン対策として 500ms 後に必ず呼ぶ。
+        setTimeout(doResolve, 500);
+        return;
+      }
       const slice  = file.slice(offset, Math.min(offset + CHUNK, file.size));
       const reader = new FileReader();
-      reader.onload = (e) => {
-        const buf = e.target.result;
+      reader.onload = (ev) => {
+        const buf = ev.target.result;
         buf.fileStart = offset;
         offset += buf.byteLength;
         const pct = offset / file.size;
-        if (blobs.length === 0) setStatus(`解析中… ${Math.round(pct*100)}%`);
+        if (blobs.length === 0) setStatus(`解析中… ${Math.round(pct * 100)}%`);
         mp4.appendBuffer(buf);
         setTimeout(readChunk, 0); // UIスレッドを解放
       };
