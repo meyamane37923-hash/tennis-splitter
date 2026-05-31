@@ -444,10 +444,11 @@
       try {
         await ensureFFmpeg();
 
-        document.getElementById('splitStatus').textContent = '動画を読み込み中…（大きなファイルは数分かかります）';
-
-        const inputData = await fetchFile(selectedFile);
-        await ffmpeg.writeFile('input.mp4', inputData);
+        // ── WORKERFS でファイルを直接マウント（全体をメモリに読まないので大容量OK）──
+        document.getElementById('splitStatus').textContent = 'ファイルをマウント中…';
+        const mountPoint = '/input';
+        await ffmpeg.mount('WORKERFS', { files: [selectedFile] }, mountPoint);
+        const inputPath = `${mountPoint}/${selectedFile.name}`;
 
         const duration  = videoDuration || 1;
         const numSeg    = Math.ceil(duration / SEGMENT_SEC);
@@ -462,10 +463,9 @@
           document.getElementById('splitBar').style.width =
             `${Math.round((i / numSeg) * 95)}%`;
 
-          // -ss を -i の前に置くと keyframe seek で高速
           await ffmpeg.exec([
             '-ss', String(start),
-            '-i', 'input.mp4',
+            '-i', inputPath,
             '-t', String(segLen),
             '-c', 'copy',
             '-avoid_negative_ts', '1',
@@ -474,7 +474,7 @@
           ]);
 
           const raw  = await ffmpeg.readFile(outName);
-          const blob = new Blob([raw], { type: 'video/mp4' }); // raw.buffer ではなく raw を渡す
+          const blob = new Blob([raw], { type: 'video/mp4' });
           segmentBlobs.push({
             blob, name: outName,
             start, end: start + segLen, index: i + 1
@@ -483,7 +483,8 @@
           await ffmpeg.deleteFile(outName);
         }
 
-        await ffmpeg.deleteFile('input.mp4');
+        // マウント解除
+        await ffmpeg.unmount(mountPoint);
 
         document.getElementById('splitBar').style.width = '100%';
         document.getElementById('splitStatus').textContent = '完了！';
