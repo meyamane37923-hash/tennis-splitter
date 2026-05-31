@@ -8,6 +8,25 @@
   <meta name="apple-mobile-web-app-title" content="動画分割">
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎾</text></svg>">
   <title>テニス動画分割</title>
+  <script>
+    // Service Worker を登録して SharedArrayBuffer（ffmpeg必須機能）を有効化
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./coi-serviceworker.js').then(function(reg) {
+        if (!self.crossOriginIsolated) {
+          if (reg.installing) {
+            reg.installing.addEventListener('statechange', function(e) {
+              if (e.target.state === 'activated') window.location.reload();
+            });
+          } else if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            window.location.reload();
+          }
+        }
+      }).catch(function(err) {
+        console.warn('SW registration failed:', err);
+      });
+    }
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -436,9 +455,15 @@
         show('step4');
 
       } catch (err) {
-        document.getElementById('splitStatus').textContent =
-          'エラー: ' + (err.message || String(err));
+        const msg = err.message || String(err);
+        document.getElementById('splitStatus').textContent = 'エラー: ' + msg;
+        document.getElementById('splitStatus').style.color = '#c0392b';
+        document.getElementById('splitStatus').style.fontWeight = '600';
+        // エラー詳細をアラートでも表示
+        alert('分割に失敗しました。\n\n' + msg + '\n\n動画が大きすぎる場合は短い動画でお試しください。');
         console.error(err);
+        hide('step3');
+        show('step2');
       }
     };
 
